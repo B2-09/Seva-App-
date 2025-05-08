@@ -1,34 +1,45 @@
-import React, { useState } from 'react';
-import { Tabs, Tab, Box } from '@mui/material';
-import CreateDynamicForm from './components/CreateDynamicForm';
-import ManageDynamicForm from './components/ManageDynamicForm';
-import PreviewDynamicForm from './components/PreviewDynamicForm';
+import React, { useState, useEffect } from 'react';
+import { Routes, Route, useNavigate } from 'react-router-dom';
+import LoginPage from './components/LoginPage';
+import SignupPage from './components/SignupPage';
+import HomePage from './components/HomePage';
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState(0);
-  const [forms, setForms] = useState([]);
+const App = () => {
+    const [token, setToken] = useState(localStorage.getItem('token'));
+    const navigate = useNavigate();
 
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
-  };
+    const handleLogin = (userToken) => {
+        setToken(userToken);
+        localStorage.setItem('token', userToken);
+        navigate('/home');
+    };
 
-  const updateForms = (newForm) => {
-    setForms(prev => [...prev, newForm]);
-  };
+    const handleSignup = (userToken) => {
+        setToken(userToken);
+        localStorage.setItem('token', userToken);
+        navigate('/home');
+    };
 
-  return (
-    <Box sx={{ width: '100%' }}>
-      <Tabs value={activeTab} onChange={handleTabChange} centered>
-        <Tab label="Create Dynamic Form" />
-        <Tab label="Manage Dynamic Form" />
-        <Tab label="Preview Dynamic Form" />
-      </Tabs>
+    const handleLogout = () => {
+        setToken(null);
+        localStorage.removeItem('token');
+        navigate('/login');
+    };
 
-      <Box sx={{ p: 2 }}>
-        {activeTab === 0 && <CreateDynamicForm addForm={updateForms} />}
-        {activeTab === 1 && <ManageDynamicForm forms={forms} />}
-        {activeTab === 2 && <PreviewDynamicForm forms={forms} />}
-      </Box>
-    </Box>
-  );
-}
+    useEffect(() => {
+        if (token) {
+            navigate('/home');
+        }
+    }, [navigate, token]);
+
+    return (
+        <Routes>
+            <Route path="/login" element={<LoginPage onLogin={handleLogin} />} />
+            <Route path="/signup" element={<SignupPage onSignup={handleSignup} />} />
+            <Route path="/home" element={<HomePage onLogout={handleLogout} />} />
+            <Route path="/" element={<HomePage onLogout={handleLogout} />} />
+        </Routes>
+    );
+};
+
+export default App;

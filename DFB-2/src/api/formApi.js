@@ -1,13 +1,20 @@
-//  src/api/formApi.js
+// src/api/formApi.js
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
+// Helper function to get the token from localStorage
+const getToken = () => {
+    return localStorage.getItem('token');
+};
+
 export const saveFormData = async (formDetails) => {
     try {
+        const token = getToken(); // Get the token
         const response = await fetch(`${API_BASE_URL}/save-form`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`, // Include the token
             },
             body: JSON.stringify(formDetails),
         });
@@ -26,11 +33,12 @@ export const saveFormData = async (formDetails) => {
 
 export const updateFormData = async (formId, formDetails) => {
     try {
-        console.log("formDetails ",formDetails)
+        const token = getToken();
         const response = await fetch(`${API_BASE_URL}/update/${formId}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`, // Include the token
             },
             body: JSON.stringify(formDetails),
         });
@@ -49,7 +57,12 @@ export const updateFormData = async (formId, formDetails) => {
 
 export const fetchForms = async () => {
     try {
-        const response = await fetch(`${API_BASE_URL}/get-forms`);
+        const token = getToken();
+        const response = await fetch(`${API_BASE_URL}/get-forms`, {
+            headers: {
+                'Authorization': `Bearer ${token}`, // Include the token
+            }
+        });
         if (!response.ok) {
             const errorData = await response.json();
             throw new Error(errorData.message || 'Failed to fetch forms');
