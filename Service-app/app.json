@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "first_NativeProject",
+    "slug": "first_NativeProject",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "backgroundColor": "black",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.anonymous.first_NativeProject"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
