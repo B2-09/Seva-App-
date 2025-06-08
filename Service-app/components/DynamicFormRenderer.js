@@ -129,6 +129,7 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
                     return;
                 }
 
+                let submissionResponse;
                 let finalFormData = { ...formData };
                 console.log("form name: ", formName)
                 if (formName.toLowerCase() === t('profile')) { // Check if the formName is "Profile " (with trailing space as in your form data)
