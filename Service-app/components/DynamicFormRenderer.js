@@ -7,13 +7,13 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import formValidations from '../util/formValidations';
 import Slider from '@react-native-community/slider';
 import { Picker } from '@react-native-picker/picker';
-import * as DocumentPicker from 'expo-document-picker'; // <--- Used to picker documents such as .pdf
+import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system'; // <--- NEW IMPORT for file system operations
 import { useTranslation } from 'react-i18next';
 import { submitFormData, submitProfileData } from '../api/formApi'; // Ensure this path is correct
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { cities } from '../util/ProfileIdGenerator';
+import { cities, indianStates } from '../util/ProfileIdGenerator'
 
 const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
     const { t } = useTranslation();
@@ -26,6 +26,9 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
 
     const [colorValue, setColorValue] = useState('#000000');
     const [imageSource, setImageSource] = useState(null);
+
+
+
 
     /**
      * Handles changes for standard text inputs, numbers, emails, etc.
@@ -60,6 +63,7 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
      * Handles the form submission.
      * Performs validation on all fields and calls the onSubmit prop if valid.
      */
+
 
     const handleSubmit = async () => {
         const validationErrors = {};
@@ -117,8 +121,11 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
         setErrors(validationErrors);
 
         if (isValid) {
+            // console.log('Form Data for Submission:', formData);
+            console.log("Form data just after valid: ", formData)
             setIsSubmitting(true); // <--- Set loading true
             try {
+
                 const userToken = await AsyncStorage.getItem('userToken'); // Ensure AsyncStorage is imported and userToken is fetched
                 console.log("userToken", userToken)
 
@@ -131,8 +138,7 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
 
                 let submissionResponse;
                 let finalFormData = { ...formData };
-                console.log("form name: ", formName)
-                if (formName.toLowerCase() === t('profile')) { // Check if the formName is "Profile " (with trailing space as in your form data)
+                if (formName.trim() === t('profile')) { // Check if the formName is "Profile " (with trailing space as in your form data)
                     // Call a dedicated function for profile data submission
                     // This function (submitProfileData) should send the form data to your backend
                     // where it will update the `form_data` JSON column in `usersprofile` table.
@@ -180,23 +186,23 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
 
                 // After successful submission, if it was the "Profile " form, navigate to the Profile screen.
                 // For other forms, you might want to navigate back, or to a success screen, or stay put.
-                if (formName.toLowerCase() === t('profile')) {
-                    console.log("form name: ", formName)
+                if (formName.trim() === t('profile')) {
                     navigation.replace('Profile'); // Go to Profile screen
                 }
                 else {
                     // For other forms, perhaps navigate back to FormList:
-                    console.log("other form name: ", formName)
                     navigation.goBack(); // or navigation.replace('FormList');
                 }
 
             } catch (error) {
                 console.error('Frontend caught submission error:', error);
-
+                console.error('Full Error Object:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+                console.log('Error.message:', error.message);
+                // Alert.alert(t('submissionFailed'), error.message || t('pleaseTryAgain'));
+                // console.log("usertoken in catch", userToken)
                 if (error.response && error.response.status === 403 &&
                     (error.response.data.message === 'Token expired. Please log in again.' || error.response.data.message === 'Invalid token.')) {
 
-                    console.log("in if condition")
                     // 1. Clear token immediately
                     console.log("usertoken in catch in if", userToken)
                     await AsyncStorage.removeItem('userToken');
@@ -236,6 +242,32 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
     /**
      * Renders a generic text input field.
      */
+
+    const renderPickerField = ({ field, value, onChange, error, options }) => (
+        <View style={styles.fieldContainer} key={field.id}>
+            <Text style={styles.label}>{t(field.label) || field.label}{field.validations && field.validations.includes('required') && <Text style={styles.required}>*</Text>}</Text>
+            <View style={styles.pickerContainer}>
+                <Picker
+                    selectedValue={value}
+                    style={styles.picker}
+                    onValueChange={(itemValue) => onChange(field.label, itemValue)}
+                >
+                    {/* Default "Select..." option */}
+                    <Picker.Item label={t(`select${field.label}`) || `Select a ${field.label}`} value="" />
+                    {options.map((option, index) => {
+                        // Check if option is an object (for cities) or a string (for states)
+                        const itemLabel = typeof option === 'object' && option !== null ? option.label : option;
+                        const itemValue = typeof option === 'object' && option !== null ? option.label : option; // CRUCIAL: Use label as value for cities
+
+                        return (
+                            <Picker.Item key={index} label={t(itemLabel) || itemLabel} value={itemValue} />
+                        );
+                    })}
+                </Picker>
+            </View>
+        </View>
+    );
+
     const renderInputField = (field) => {
         const { maxLength } = field;
         const actualMaxLength = maxLength ? Number(maxLength) : undefined;
@@ -627,7 +659,8 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
                             base64: base64Content, // Store Base64 content
                         };
 
-                        setImageUri({ uri: pickedAsset.uri }); // Set local URI for display
+                        setImageUri({ uri: pickedAsset.uri, name: pickedAsset.name }); // Set local URI for display
+                        console.log("Image name", pickedAsset.name)
                         handleChange(field.label, imageDataToStore); // Update form data
                     } else {
                         Alert.alert("Invalid File Type", "Please select an image file (e.g., JPG, PNG).");
@@ -669,7 +702,7 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
                 // For simplicity, we'll clear display if it's not a direct URI.
                 setImageUri(null); // Clear image display if not a direct file URI
             } else if (formData[field.label] && formData[field.label].uri) {
-                setImageUri({ uri: formData[field.label].uri });
+                setImageUri({ uri: formData[field.label].uri, name: formData[field.label].name });
             } else {
                 setImageUri(null);
             }
@@ -686,7 +719,14 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
                         <Text style={styles.uploadButtonText}>{t('pickImage')}</Text>
                     )}
                 </TouchableOpacity>
-                {imageUri && <Image source={imageUri} style={{ width: 100, height: 100, marginTop: 10, borderRadius: 5 }} />}
+                {imageUri &&
+                    <View style={styles.fileInfo}>
+                        <Text>{t('fileName')}: {imageUri.name || 'N/A'}</Text>
+                        <Text>{t('fileSize')}: {imageUri.size ? `${pickedFileDetails.size} bytes` : 'N/A'}</Text>
+                        <Text>{t('fileType')}: {imageUri.mimeType || 'N/A'}</Text>
+                    </View>
+
+                }
                 {/* Optionally display file info like name/size for images too if needed */}
             </View>
         );
@@ -742,7 +782,6 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
         );
     };
 
-    // These contain the keys which take the flow to their corresponding functions
     const fieldRenderers = {
         'text': renderInputField,
         'password': renderInputField,
@@ -776,6 +815,41 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
     return (
         <View>
             {fields.map((field) => {
+
+                const commonProps = {
+                    key: field.id,
+                    field: field,
+                    value: formData[field.label],
+                    onChange: handleChange,
+                    error: errors[field.label],
+                    t: t,
+                };
+
+                // --- CRUCIAL CHANGE: Conditional rendering for 'State' label ---
+                if (field.label.trim() === t('state')) {
+                    return (
+                        <View key={field.id} style={styles.inputContainer}>
+                            {renderPickerField({
+                                ...commonProps,
+                                options: indianStates // Pass the indianStates array
+                            })}
+                            {errors[field.label] && <Text style={styles.error}>{errors[field.label]}</Text>}
+                        </View>
+                    );
+                }
+
+                if (field.label.trim() === t('city')) {
+                    return (
+                        <View key={field.id} style={styles.inputContainer}>
+                            {renderPickerField({
+                                ...commonProps,
+                                options: cities // Pass the indianStates array
+                            })}
+                            {errors[field.label] && <Text style={styles.error}>{errors[field.label]}</Text>}
+                        </View>
+                    );
+                }
+
                 const Renderer = fieldRenderers[field.controlType] || null;
                 return (
                     <View key={field.id} style={styles.inputContainer}>
@@ -784,8 +858,8 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
                             field.controlType !== 'reset' &&
                             field.controlType !== 'image' && (
                                 <Text style={styles.label}>
-                                    {field.label}
-                                    {field.required && <Text style={styles.required}>*</Text>}
+                                    {t(field.label)}
+                                    {field.validations && field.validations.includes('required') && <Text style={styles.required}>*</Text>}
                                 </Text>
                             )}
                         {Renderer ? (
@@ -810,7 +884,7 @@ const DynamicFormRenderer = ({ fields, onSubmit, formId, formName }) => {
 
 const styles = StyleSheet.create({
     inputContainer: {
-        marginBottom: 20,
+        marginBottom: 30,
     },
     label: {
         fontSize: 16,
@@ -896,6 +970,37 @@ const styles = StyleSheet.create({
         marginTop: 10,
         fontSize: 16,
         color: '#333',
+    },
+    pickerContainer: {
+        borderWidth: 1,
+        borderColor: '#ccc',
+        borderRadius: 5,
+        overflow: 'hidden', // Ensures border radius is applied to the picker
+        backgroundColor: '#fff',
+    },
+    picker: {
+        height: 50, // Standard height for Picker
+        width: '100%',
+        color: '#333', // Text color for picker items
+    },
+    label: { // Style for the field label
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 5,
+        color: '#333',
+    },
+    required: { // Style for the '*' of required fields
+        color: 'red',
+    },
+    helper: { // Style for helper text
+        fontSize: 12,
+        color: '#666',
+        marginTop: 3,
+    },
+    errorText: { // Ensure this is also defined for consistent error display
+        color: 'red',
+        fontSize: 12,
+        marginTop: 5,
     },
 });
 
