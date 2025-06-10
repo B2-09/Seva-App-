@@ -1,6 +1,8 @@
 const mysql = require('mysql2/promise');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt'); // For password hashing
+const fs = require('fs').promises; // <--- NEW IMPORT for file system operations
+const path = require('path');
 
 // Database connection configuration
 const dbConfig = {
@@ -19,6 +21,22 @@ const secretKey = 'PPAPPPAPPineApplePenAPPLEpen';  // CHANGE THIS TO A SECURE VA
 const getConnection = async () => {
     return await mysql.createConnection(dbConfig);
 };
+
+const UPLOADS_DIR = path.join(__dirname, 'uploads'); // <--- NEW: Define uploads directory
+
+// Ensure the uploads directory exists
+const ensureUploadsDirExists = async () => { // <--- NEW: Function to create directory
+    try {
+        await fs.mkdir(UPLOADS_DIR, { recursive: true });
+        console.log(`Uploads directory created or already exists at: ${UPLOADS_DIR}`);
+    } catch (error) {
+        console.error('Error ensuring uploads directory exists:', error);
+        // You might want to throw or handle this error more robustly
+    }
+};
+
+// Call this once when your server starts up
+ensureUploadsDirExists();
 
 // --- Controller Functions ---
 
@@ -102,7 +120,7 @@ const loginUser = async (req, res) => {
     }
 };
 
-// Asynchronous function to save form data to the database.
+// Asynchronous function to save form data (form definition) to the database.
 const saveFormData = async (req, res) => {
     try {
         const { formName, formDescription, fields } = req.body;
@@ -130,7 +148,7 @@ const saveFormData = async (req, res) => {
     }
 };
 
-// Asynchronous function to retrieve all form data from the database.
+// Asynchronous function to retrieve all form data (form definitions) from the database.
 const getAllFormsData = async (req, res) => {
     try {
         const connection = await getConnection();
@@ -147,7 +165,7 @@ const getAllFormsData = async (req, res) => {
     }
 };
 
-// Asynchronous function to update existing form data in the database.
+// Asynchronous function to update existing form data (form definition) in the database.
 const updateFormData = async (req, res) => {
     const { formId } = req.params;
     const { form_data } = req.body;
@@ -184,7 +202,7 @@ const updateFormData = async (req, res) => {
     }
 };
 
-// Asynchronous function to retrieve form data by its ID from the database.
+// Asynchronous function to retrieve form data (form definition) by its ID from the database.
 const getFormDataById = async (req, res) => {
     const { formId } = req.params;
 
@@ -206,24 +224,229 @@ const getFormDataById = async (req, res) => {
 
 // Asynchronous function to get user data
 const getUserData = async (req, res) => {
-  try {
-    const userId = req.auth.sub; // Get user ID from the JWT
+    try {
+        const userId = req.auth.sub; // Get user ID from the JWT
 
-    const connection = await getConnection();
-    const [users] = await connection.execute('SELECT id, name, email FROM users WHERE id = ?', [userId]);
-    await connection.end();
+        const connection = await getConnection();
+        const [users] = await connection.execute('SELECT id, name, email FROM users WHERE id = ?', [userId]);
+        await connection.end();
 
-    if (users.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
+        if (users.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const user = users[0];
+        res.status(200).json({ id: user.id, name: user.name, email: user.email });
+    } catch (error) {
+        console.error('Error fetching user data:', error);
+        res.status(500).json({ error: 'Failed to fetch user data' });
     }
-
-    const user = users[0];
-    res.status(200).json({ id: user.id, name: user.name, email: user.email });
-  } catch (error) {
-    console.error('Error fetching user data:', error);
-    res.status(500).json({ error: 'Failed to fetch user data' });
-  }
 };
+
+const submitFormSubmission = async (req, res) => {
+    try {
+        const { formId } = req.params;
+        const formData = req.body;
+
+        if (!formId) {
+            return res.status(400).json({ error: 'Form ID is required for submission.' });
+        }
+        if (typeof formData !== 'object' || formData === null) {
+            return res.status(400).json({ error: 'Invalid form data format. Expected a JSON object.' });
+        }
+
+        const filesToSave = []; // Array to store details of files to save
+
+        // <--- NEW LOGIC: Iterate through formData to find and process files ---
+        for (const key in formData) {
+            if (formData.hasOwnProperty(key)) {
+                const fieldData = formData[key];
+
+                // Check if the field looks like a file/image object (has base64, name, mimeType)
+                if (typeof fieldData === 'object' && fieldData !== null &&
+                    fieldData.base64 && fieldData.name && fieldData.mimeType) {
+
+                    const base64Content = fieldData.base64;
+                    const fileName = fieldData.name;
+                    const mimeType = fieldData.mimeType;
+
+                    // Generate a unique file name to prevent conflicts
+                    const uniqueFileName = `${Date.now()}_${fileName}`;
+                    const filePath = path.join(UPLOADS_DIR, uniqueFileName);
+
+                    try {
+                        // Decode Base64 and write the file
+                        const fileBuffer = Buffer.from(base64Content, 'base64');
+                        await fs.writeFile(filePath, fileBuffer);
+
+                        // Store the server-side file path and URL (if applicable)
+                        // This URL is what you'd save in the database to retrieve the file later
+                        const fileUrl = `/uploads/${uniqueFileName}`; // Adjust based on how you serve static files
+
+                        // Update the formData with the server-side file path/URL
+                        // Instead of the raw base64, save the path
+                        formData[key] = {
+                            name: fileName,
+                            mimeType: mimeType,
+                            url: fileUrl // This is the URL to access the saved file
+                        };
+
+                        console.log(`File saved: ${filePath}`);
+
+                    } catch (fileError) {
+                        console.error(`Error saving file ${fileName}:`, fileError);
+                        // Decide how to handle file saving errors (e.g., skip this file, return error)
+                        // For now, we'll log and continue, but the formData for this field will be incomplete
+                        formData[key] = {
+                            name: fileName,
+                            mimeType: mimeType,
+                            error: 'Failed to save file on server'
+                        };
+                    }
+                }
+            }
+        }
+        // <--- END NEW LOGIC ---
+
+        const connection = await getConnection();
+
+        const [result] = await connection.execute(
+            'INSERT INTO form_submissions (form_id, submitted_data) VALUES (?, ?)',
+            [formId, JSON.stringify(formData)] // formData now contains file URLs/metadata
+        );
+
+        const submissionId = result.insertId || 'N/A (UUID handled by DB)';
+
+        await connection.end();
+
+        res.status(201).json({ message: 'Form submission saved successfully!', submissionId: submissionId });
+
+    } catch (error) {
+        console.error('Error saving form submission:', error);
+        res.status(500).json({ error: 'Failed to save form submission.' });
+    }
+};
+
+const submitProfileData = async (req, res) => {
+    let connection;
+    try {
+        connection = await getConnection();
+
+        const formData = req.body; // This is the entire form data from the frontend
+        // const userId = req.user.userId; // Previous way of getting ID
+        const phoneNumberFromToken = req.user.phoneNumber; // Get phone number from the authenticated token
+        console.log(phoneNumberFromToken)
+
+        if (!phoneNumberFromToken) {
+            // This case should ideally not happen if JWT middleware is correctly set up
+            return res.status(401).json({ message: 'Phone number not found in authentication token.' });
+        }
+
+        // Handle image data if present in formData from the 'Profile photo' field
+        if (formData['Profile photo'] && formData['Profile photo'].base64) {
+            const imageData = formData['Profile photo'];
+            const base64Data = imageData.base64;
+            const mimeType = imageData.mimeType;
+            const fileName = `${Date.now()}_${imageData.name}`;
+            const uploadDir = path.join(__dirname, '../uploads');
+            const filePath = path.join(uploadDir, fileName);
+
+            await fs.mkdir(uploadDir, { recursive: true });
+            const base64Image = base64Data.split(';base64,').pop();
+            await fs.writeFile(filePath, base64Image, { encoding: 'base64' });
+
+            // Store the relative URL in formData before saving to JSON column
+            formData['Profile photo'] = {
+                url: `/uploads/${fileName}`, // This URL will be saved in the JSON
+                name: imageData.name,
+                mimeType: mimeType,
+            };
+            console.log(`Profile image saved to: ${filePath}, URL: ${formData['Profile photo'].url}`);
+        }
+
+        // Convert the entire formData object to a JSON string
+        const formDataJsonString = JSON.stringify(formData);
+
+        // Update the usersprofile table's form_data column based on phone_number
+        const updateQuery = `
+            UPDATE usersprofile
+            SET form_data = ?
+            WHERE phone_number = ?; 
+        `;
+        // -- <--- CRUCIAL CHANGE: Using phone_number in WHERE clause
+        const [result] = await connection.execute(updateQuery, [formDataJsonString, phoneNumberFromToken]); // Pass phone number
+
+        if (result.affectedRows === 0) {
+            // This might happen if the phone_number in the token doesn't match an existing row
+            // or if no data was actually changed.
+            return res.status(404).json({ message: 'User profile not found for this phone number or no data changed.' });
+        }
+
+        res.status(200).json({
+            message: 'Profile data updated successfully!',
+            submittedData: formData // Return the processed formData (with image URL)
+        });
+
+    } catch (error) {
+        console.error('Error submitting profile data:', error);
+        res.status(500).json({ message: 'Failed to update profile data.', error: error.message });
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
+const getProfileData = async (req, res) => {
+    let connection;
+    try {
+        connection = await getConnection();
+        const phoneNumberFromToken = req.user.phoneNumber; // Get phone number from authenticated token
+
+        if (!phoneNumberFromToken) {
+            return res.status(401).json({ message: 'Phone number not found in authentication token.' });
+        }
+
+        const [rows] = await connection.execute(
+            'SELECT id, phone_number, form_data FROM usersprofile WHERE phone_number = ?',
+            [phoneNumberFromToken]
+        );
+
+        const userProfile = rows[0];
+
+        if (!userProfile) {
+            return res.status(404).json({ message: 'Profile not found.' });
+        }
+
+        // The 'form_data' column (JSON type in MySQL) should come back as a JS object directly.
+        // Add a check for string conversion for robustness, though usually not needed for JSON type.
+        let formData = userProfile.form_data;
+        if (typeof formData === 'string') {
+            try {
+                formData = JSON.parse(formData);
+                console.log(formData)
+            } catch (parseError) {
+                console.error('Error parsing form_data from DB (it was a string):', parseError);
+                formData = {}; // Default to empty object on parse failure
+            }
+        } else if (!formData) {
+            formData = {}; // Default to empty object if null/undefined
+        }
+
+        const combinedProfileData = {
+            id: userProfile.id,
+            phoneNumber: userProfile.phone_number,
+            formData: formData // This now contains all the form fields including 'profile_id' if generated
+        };
+
+        res.status(200).json({ profile: combinedProfileData });
+
+    } catch (error) {
+        console.error('Error fetching profile data:', error);
+        res.status(500).json({ message: 'Failed to fetch profile data.', error: error.message });
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
 
 // Exports the controller functions
 module.exports = {
@@ -234,150 +457,7 @@ module.exports = {
     updateFormData,
     getFormDataById,
     getUserData,
+    submitFormSubmission, // Export the new function
+    submitProfileData,
+    getProfileData,
 };
-
-// const mysql = require('mysql2/promise'); // Imports the asynchronous MySQL library.
-
-// // Database connection configuration object.
-// const dbConfig = {
-//     host: 'localhost', // Replace with your database host - the address of your MySQL server.
-//     user: 'root', // Replace with your database user - the username for connecting to the database.
-//     password: 'root', // Replace with your database password - the password for the specified user.
-//     database: 'dynamic_screen_db' // Replace with your database name - the name of the database to use.
-// };
-
-// // Asynchronous function to save form data to the database.
-// const saveFormData = async (req, res) => {
-//     try {
-//         // Extracts formName, formDescription, and fields from the request body.
-//         const { formName, formDescription, fields } = req.body;
-//         // Creates a complete JSON object containing all form details.
-//         const formData = { formName, formDescription, fields };
-
-//         // Basic validation to ensure formName is present in the request.
-//         if (!formName) {
-//             // If formName is missing, return a 400 (Bad Request) error with a message.
-//             return res.status(400).json({ error: 'Form name is required in the request.' });
-//         }
-
-//         // Establishes a new asynchronous connection to the MySQL database using the dbConfig.
-//         const connection = await mysql.createConnection(dbConfig);
-
-//         // Executes an SQL INSERT query to save the entire formData as a JSON string in the 'forms' table.
-//         const [formResult] = await connection.execute(
-//             'INSERT INTO forms (form_data) VALUES (?)',
-//             [JSON.stringify(formData)] // Converts the JavaScript object into a JSON string before saving.
-//         );
-//         // Retrieves the ID of the newly inserted form record.
-//         const formId = formResult.insertId;
-
-//         // Closes the database connection.
-//         await connection.end();
-
-//         // Returns a 201 (Created) success response with a message and the newly generated form ID.
-//         res.status(201).json({ message: 'Form data saved as JSON successfully!', formId: formId });
-
-//     } catch (error) {
-//         // Catches any errors that occur during the process.
-//         console.error('Error saving form data as JSON:', error);
-//         // Returns a 500 (Internal Server Error) response with an error message.
-//         res.status(500).json({ error: 'Failed to save form data as JSON.' });
-//     }
-// };
-
-// // Asynchronous function to retrieve all form data from the database.
-// const getAllFormsData = async (req, res) => {
-//     try {
-//         // Establishes a new asynchronous connection to the MySQL database.
-//         const connection = await mysql.createConnection(dbConfig);
-
-//         // Executes an SQL SELECT query to retrieve the id, is_active status, and form_data from the 'forms' table.
-//         const [forms] = await connection.execute('SELECT id, is_active, form_data FROM forms');
-
-//         // Closes the database connection.
-//         await connection.end();
-
-//         // Returns a 200 (OK) success response with an array of all form records.
-//         res.status(200).json(forms);
-
-//     } catch (error) {
-//         // Catches any errors during the process.
-//         console.error('Error fetching all form data (as JSON):', error);
-//         // Returns a 500 (Internal Server Error) response with an error message.
-//         res.status(500).json({ error: 'Failed to fetch form data (as JSON).' });
-//     }
-// };
-
-// // Asynchronous function to update existing form data in the database.
-// const updateFormData = async (req, res) => {
-//     const { formId } = req.params;
-//     const { form_data } = req.body;
-
-//     let formDescription, fields, formName; // Add formName here
-//     if (form_data) {
-//         formDescription = form_data.formDescription;
-//         fields = form_data.fields;
-//         formName = form_data.formName; // Extract formName
-//     } else {
-//         formDescription = undefined;
-//         fields = undefined;
-//         formName = undefined;
-//     }
-
-//     const updatedFormData = { formDescription, fields, formName }; // Include formName in updatedFormData
-
-//     try {
-//         const connection = await mysql.createConnection(dbConfig);
-//         const [result] = await connection.execute(
-//             'UPDATE forms SET form_data = ? WHERE id = ?',
-//             [JSON.stringify(updatedFormData), formId]
-//         );
-//         await connection.end();
-
-//         if (result.affectedRows > 0) {
-//             res.status(200).json({ message: 'Form updated successfully!' });
-//         } else {
-//             res.status(404).json({ error: 'Form not found.' });
-//         }
-//     } catch (error) {
-//         console.error('Error updating form data:', error);
-//         res.status(500).json({ error: 'Failed to update form data.' });
-//     }
-// };
-
-// // Asynchronous function to retrieve form data by its ID from the database.
-// const getFormDataById = async (req, res) => {
-//     // Extracts the formId from the request parameters.
-//     const { formId } = req.params;
-
-//     try {
-//         // Establishes a new asynchronous connection to the MySQL database.
-//         const connection = await mysql.createConnection(dbConfig);
-//         // Executes an SQL SELECT query to retrieve the form_data for a specific form ID.
-//         const [form] = await connection.execute('SELECT form_data FROM forms WHERE id = ?', [formId]);
-//         // Closes the database connection.
-//         await connection.end();
-
-//         // Checks if any form record was found with the given ID.
-//         if (form.length > 0) {
-//             // If a form is found, return a 200 (OK) response with the form data (assuming form_data is the only column needed).
-//             res.status(200).json(form[0]);
-//         } else {
-//             // If no form with the given ID was found, return a 404 (Not Found) error.
-//             res.status(404).json({ error: 'Form not found.' });
-//         }
-//     } catch (error) {
-//         // Catches any errors during the fetch process.
-//         console.error('Error fetching form data by ID:', error);
-//         // Returns a 500 (Internal Server Error) response with an error message.
-//         res.status(500).json({ error: 'Failed to fetch form data.' });
-//     }
-// };
-
-// // Exports the controller functions to be used in route definitions.
-// module.exports = {
-//     saveFormData, // Function to save new form data.
-//     getAllFormsData, // Function to retrieve all form data.
-//     updateFormData, // Function to update existing form data.
-//     getFormDataById, // Function to retrieve form data by its ID.
-// };
